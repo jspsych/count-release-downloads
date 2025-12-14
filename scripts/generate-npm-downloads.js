@@ -3,19 +3,63 @@ const fs = require('fs');
 async function getPackages() {
   // Search for all packages containing 'jspsych'
   const url = `https://registry.npmjs.org/-/v1/search?text=jspsych&size=250`;
-  const res = await fetch(url);
-  const data = await res.json();
-  // Only keep packages that start with '@jspsych/' or '@jspsych-contrib/'
-  return data.objects
-    .map(obj => obj.package.name)
-    .filter(name => name.startsWith('@jspsych/') || name.startsWith('@jspsych-contrib/'));
+  try {
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'jspsych-download-counter/1.0'
+      }
+    });
+    
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    }
+    
+    const data = await res.json();
+    // Only keep packages that start with '@jspsych/' or '@jspsych-contrib/'
+    return data.objects
+      .map(obj => obj.package.name)
+      .filter(name => name.startsWith('@jspsych/') || name.startsWith('@jspsych-contrib/'));
+  } catch (error) {
+    console.error('Error fetching packages:', error.message);
+    throw error;
+  }
 }
 
 async function getDownloadCount(pkg) {
   const url = `https://api.npmjs.org/downloads/point/last-month/${pkg}`;
-  const res = await fetch(url);
-  const data = await res.json();
-  return { package: pkg, downloads: data.downloads || 0 };
+  try {
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'jspsych-download-counter/1.0'
+      }
+    });
+    
+    // Check if response is ok
+    if (!res.ok) {
+      console.error(`Failed to fetch ${pkg}: HTTP ${res.status}`);
+      return { package: pkg, downloads: 0 };
+    }
+    
+    // Check content type
+    const contentType = res.headers.get('content-type');
+    if (!contentType || !contentType.includes('application/json')) {
+      console.error(`Invalid content type for ${pkg}: ${contentType}`);
+      const text = await res.text();
+      console.error(`Response body (first 200 chars): ${text.substring(0, 200)}`);
+      return { package: pkg, downloads: 0 };
+    }
+    
+    const data = await res.json();
+    return { package: pkg, downloads: data.downloads || 0 };
+  } catch (error) {
+    console.error(`Error fetching downloads for ${pkg}:`, error.message);
+    return { package: pkg, downloads: 0 };
+  }
+}
+
+// Helper function to add delay between requests
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 (async () => {
@@ -23,10 +67,25 @@ async function getDownloadCount(pkg) {
   packages.push('jspsych'); // ensure core package is included
   packages = Array.from(new Set(packages)); // deduplicate
 
-  // Fetch download counts in parallel for speed
-  const results = await Promise.all(
-    packages.map(pkg => getDownloadCount(pkg))
-  );
+  // Fetch download counts with rate limiting to avoid API issues
+  // Process in batches of 10 with a delay
+  const results = [];
+  const batchSize = 10;
+  const delayBetweenBatches = 1000; // 1 second between batches
+  
+  for (let i = 0; i < packages.length; i += batchSize) {
+    const batch = packages.slice(i, i + batchSize);
+    const batchResults = await Promise.all(
+      batch.map(pkg => getDownloadCount(pkg))
+    );
+    results.push(...batchResults);
+    
+    // Add delay between batches (except for the last batch)
+    if (i + batchSize < packages.length) {
+      await delay(delayBetweenBatches);
+    }
+  }
+  
   results.sort((a, b) => b.downloads - a.downloads);
 
   // Count packages by scope
