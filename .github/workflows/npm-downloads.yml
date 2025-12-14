@@ -14,7 +14,7 @@ jobs:
         with:
           node-version: '20'
       - name: Install dependencies
-        run: npm install
+        run: npm ci
       - name: Generate downloads HTML
         run: node scripts/generate-npm-downloads.js
       - name: Commit and push changes
