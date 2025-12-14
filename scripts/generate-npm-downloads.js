@@ -11,7 +11,8 @@ async function getPackages() {
     });
     
     if (!res.ok) {
-      throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      console.error(`Failed to fetch packages: HTTP ${res.status}: ${res.statusText}`);
+      return [];
     }
     
     const data = await res.json();
@@ -21,7 +22,7 @@ async function getPackages() {
       .filter(name => name.startsWith('@jspsych/') || name.startsWith('@jspsych-contrib/'));
   } catch (error) {
     console.error('Error fetching packages:', error.message);
-    throw error;
+    return [];
   }
 }
 
@@ -44,8 +45,6 @@ async function getDownloadCount(pkg) {
     const contentType = res.headers.get('content-type');
     if (!contentType || !contentType.includes('application/json')) {
       console.error(`Invalid content type for ${pkg}: ${contentType}`);
-      const text = await res.text();
-      console.error(`Response body (first 200 chars): ${text.substring(0, 200)}`);
       return { package: pkg, downloads: 0 };
     }
     
