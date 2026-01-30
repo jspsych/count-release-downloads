@@ -26,34 +26,44 @@ async function getPackages() {
   }
 }
 
-async function getDownloadCount(pkg) {
-  const url = `https://registry.npmjs.org/-/npm/v1/downloads/point/last-month/${pkg}`;
-  try {
-    const res = await fetch(url, {
-      headers: {
-        'User-Agent': 'jspsych-download-counter/1.0'
+async function getDownloadCount(pkg, retries = 3) {
+  const url = `https://api.npmjs.org/downloads/point/last-month/${pkg}`;
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const res = await fetch(url, {
+        headers: {
+          'User-Agent': 'jspsych-download-counter/1.0'
+        }
+      });
+
+      // Retry on rate limit
+      if (res.status === 429) {
+        const waitTime = Math.pow(2, attempt) * 1000;
+        console.warn(`Rate limited on ${pkg}, retrying in ${waitTime}ms (attempt ${attempt + 1}/${retries})`);
+        await delay(waitTime);
+        continue;
       }
-    });
-    
-    // Check if response is ok
-    if (!res.ok) {
-      console.error(`Failed to fetch ${pkg}: HTTP ${res.status}`);
+
+      if (!res.ok) {
+        console.error(`Failed to fetch ${pkg}: HTTP ${res.status}`);
+        return { package: pkg, downloads: 0 };
+      }
+
+      const contentType = res.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        console.error(`Invalid content type for ${pkg}: ${contentType}`);
+        return { package: pkg, downloads: 0 };
+      }
+
+      const data = await res.json();
+      return { package: pkg, downloads: data.downloads || 0 };
+    } catch (error) {
+      console.error(`Error fetching downloads for ${pkg}:`, error.message);
       return { package: pkg, downloads: 0 };
     }
-    
-    // Check content type
-    const contentType = res.headers.get('content-type');
-    if (!contentType || !contentType.includes('application/json')) {
-      console.error(`Invalid content type for ${pkg}: ${contentType}`);
-      return { package: pkg, downloads: 0 };
-    }
-    
-    const data = await res.json();
-    return { package: pkg, downloads: data.downloads || 0 };
-  } catch (error) {
-    console.error(`Error fetching downloads for ${pkg}:`, error.message);
-    return { package: pkg, downloads: 0 };
   }
+  console.error(`Failed to fetch ${pkg} after ${retries} retries (rate limited)`);
+  return { package: pkg, downloads: 0 };
 }
 
 // Helper function to add delay between requests
@@ -66,22 +76,15 @@ function delay(ms) {
   packages.push('jspsych'); // ensure core package is included
   packages = Array.from(new Set(packages)); // deduplicate
 
-  // Fetch download counts with rate limiting to avoid API issues
-  // Process in batches of 10 with a delay
+  // Fetch download counts sequentially with a delay between each request
   const results = [];
-  const batchSize = 10;
-  const delayBetweenBatches = 1000; // 1 second between batches
-  
-  for (let i = 0; i < packages.length; i += batchSize) {
-    const batch = packages.slice(i, i + batchSize);
-    const batchResults = await Promise.all(
-      batch.map(pkg => getDownloadCount(pkg))
-    );
-    results.push(...batchResults);
-    
-    // Add delay between batches (except for the last batch)
-    if (i + batchSize < packages.length) {
-      await delay(delayBetweenBatches);
+  const delayBetweenRequests = 500; // 500ms between requests
+
+  for (let i = 0; i < packages.length; i++) {
+    const result = await getDownloadCount(packages[i]);
+    results.push(result);
+    if (i < packages.length - 1) {
+      await delay(delayBetweenRequests);
     }
   }
   
