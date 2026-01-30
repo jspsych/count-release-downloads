@@ -27,7 +27,7 @@ async function getPackages() {
 }
 
 async function getDownloadCount(pkg) {
-  const url = `https://api.npmjs.org/downloads/point/last-month/${pkg}`;
+  const url = `https://registry.npmjs.org/-/npm/v1/downloads/point/last-month/${pkg}`;
   try {
     const res = await fetch(url, {
       headers: {
